@@ -13,3 +13,8 @@ results
 
 node_modules
 npm-debug.log
+
+loadtest.sublime-project
+loadtest.sublime-workspace
+
+loadtest.log
