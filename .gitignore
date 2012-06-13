@@ -10,11 +10,11 @@ lib-cov
 pids
 logs
 results
-
 node_modules
-npm-debug.log
 
+server
+npm-debug.log
+loadtest.log
 loadtest.sublime-project
 loadtest.sublime-workspace
 
-loadtest.log
