@@ -44,7 +44,7 @@ var events = require('events'),
 http.globalAgent.maxSockets = 500;
 
 
-/* ------------ Custom Objects and Functions ------------- 
+/* ------------ Custom Objects and Functions -------------*/ 
 // Setup Eventer
 function RequestEventer() {
   events.EventEmitter.call(this);
