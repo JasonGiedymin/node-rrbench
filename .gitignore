@@ -1,3 +1,16 @@
+# Global .gitignore
+
+## Dirs
+node_modules
+tmp
+temp
+
+## Generic
+*~
+*.lock
+*.DS_Store
+*.swp
+
 lib-cov
 *.seed
 *.log
@@ -10,11 +23,20 @@ lib-cov
 pids
 logs
 results
-node_modules
 
-server
+## Java
+*.class
+
+## Python
+*.pyc
+
+## NodeJS Specific
+.migrate
 npm-debug.log
-loadtest.log
-loadtest.sublime-project
-loadtest.sublime-workspace
 
+## Misc
+.sass-cache
+misc
+
+## DB
+db

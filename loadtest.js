@@ -7,26 +7,6 @@ author: Jason Giedymin --<jasong>_at_<apache>dot<org>--
 
 */
 
-/*
-- TODO: remove global eventer passing
-TODO: yield on error, try not calling callback
-TODO: stats
-- TODO: shove request options in
-- TODO: cleanup passed in objs
-- TODO: cleanup globals, and pass in obj instead
-- TODO: use fx constructor and store mutations/data in self
-TODO: maxsockets message and check
-TODO: note that thread contention mode use simulate, otherwise linear n tps
-- TODO: progressbar basic
-TODO: user input
-TODO: THE loop, AMD
-TODO: csv output
-TODO: stream output
-+ TODO: cli
-TODO: Modularize
-TODO: Import unit tests
-*/
-
 (function() {
 // Purposely not AMD nor require framed, but raw script
 // exports ready, none defined
@@ -41,10 +21,9 @@ var events = require('events'),
     program = require('commander'),
     http = require('http');
 
-http.globalAgent.maxSockets = 500;
+http.globalAgent.maxSockets = 50000;
 
-
-/* ------------ Custom Objects and Functions -------------*/ 
+/* ------------ Custom Objects and Functions ------------- */
 // Setup Eventer
 function RequestEventer() {
   events.EventEmitter.call(this);
@@ -64,8 +43,8 @@ function url(req_obj, event_opt) {
     }
   };
 
-  return {
-    method: "GET",
+  const returnVal = {
+    method: req_obj.method,
     url: req_obj.scheme + formatting.delimiters.proto + req_obj.host + 
          formatting.delimiters.socket + req_obj.port +
          formatting.delimiters.seperator + req_obj.url,
@@ -76,7 +55,10 @@ function url(req_obj, event_opt) {
       "Connection": "Keep-Alive"
     }
     ,timeout: event_opt.timeout
-  }
+    ,body: JSON.stringify(req_obj.body)
+  };
+
+  return returnVal;
 };
 
 function simulate(min, max) { // need a better rand distr, maintain this api
@@ -176,10 +158,17 @@ function Hammer(mutants, app_opt, event_opt, req_obj) {
 
     function requestComplete(error, response, body) {
       if (!error && response.statusCode == 200) {
+        if(app_opt.debug)
+          log(body)
+
         mutants.count.pass++;
         curr_timing.end = microtime.now();
+        calculateTime(curr_timing);
         timings.push(curr_timing);
-        tickProgressBar();
+
+        if (app_opt.show_progress)
+          tickProgressBar();
+        
         callback();
       }
       else {
@@ -252,17 +241,19 @@ function Hammer(mutants, app_opt, event_opt, req_obj) {
       this.total = app_opt.queue;
       this.info = "x[" + app_opt.concurrency + "]";
     }
-    mutants.progress_bar = new ProgressBar('  hammer :total=' + info + ' [:bar] :percent +:elapsed/-:etas', { total: this.total, width: 50});
+    mutants.progress_bar = new ProgressBar('  ' + program.mode + ' :total=' + info + ' [:bar] :percent +:elapsed/-:etas :avgms/req', { total: this.total, width: 50, avg: 10});
   }
 
   function tickProgressBar() { // keep this api
-    mutants.progress_bar.tick();
+    mutants.progress_bar.tick({'avg':(mutants.time.avg/1000).toFixed(2)});
   }
 
   function runConcurrency() {
     var timings = [];
     var range = _.range(1, app_opt.queue+1);
-    createProgressBar(mutants, app_opt);
+
+    if (app_opt.show_progress)
+      createProgressBar(mutants, app_opt);
 
     function next(req_id, callback) {
       sendRequest(timings, '?', req_id, callback);
@@ -290,6 +281,21 @@ function Hammer(mutants, app_opt, event_opt, req_obj) {
     });
   }
 
+  function calculateTime(timing_stat) {
+    var curr_time = timing_stat.end - timing_stat.start;
+    var counts = mutants.count.pass + mutants.count.fail;
+
+    mutants.time.total = mutants.time.total + curr_time;
+
+    if(curr_time < mutants.time.min)
+      mutants.time.min = curr_time;
+
+    if(curr_time > mutants.time.max)
+      mutants.time.max = curr_time;
+
+    mutants.time.avg = (mutants.time.total / counts);
+  }
+
   this.bang = function() {
     if(app_opt.simulate)
       runConcurrent();
@@ -302,20 +308,34 @@ function Hammer(mutants, app_opt, event_opt, req_obj) {
 
 function commandLine(program, args) {
   program
-    .version('0.9.0')
-    .usage('-[lvvms] -h --help\n' +
-      '  Note:\n' +
-      '   In [queue] mode, the requests option is ignored.' +
-      '   In [blitz] mode, the queue option is ignored.'
+    .version('0.9.5')
+    .usage('-[lvvms] -h --help\n\n' +
+      '  Notes:\n' +
+      '   Timing is done at a resolution of 1/1,000,000 of a second.\n' +
+      '   In [queue] mode, the requests option is ignored.\n' +
+      '   In [blitz] mode, the queue option is ignored.\n' +
+      '\n' +
+      '  Blitz mode simulates the seemingly randomness of requests from the internet.\n' +
+      '  Queue mode will send requests pending the next in a queue until a message is received.\n' +
+      '\n' +
+      '  * All modes are queue backed however queue mode shares a single queue.\n' +
+      '    A seperate queue exists for each concurrent request (-k) asked to create in blitz mode.\n' +
+      '  * Logging is disabled by default.\n' +
+      '\n' +
+      '  Example:\n' +
+      '    - Queue mode, 8 concurrent request pumps filled with 1000 requests each (8000 total)\n' +
+      '      node loadtest.js -m queue -k 8 -q 1000\n' +
+      '\n' +
+      '  See LICENSE file for license and legal information.\n\n'
     )
-    .option('-l, --logging', 'Enables stats logging to loadtest.log, disabled by default.')
+    .option('-l, --logging', 'Enables microtiming stats logging to loadtest.log, disabled by default.')
     .option('-v, --verbose', 'Verbosely displays status, disabled by default.')
-    .option('-vv, --very-verbose', 'Very Verbose. Disabled by default. Warning: will show all available info.') // shout-out to lvm's Heinz M.
+    .option('-y, --very-verbose', 'Very Verbose. Disabled by default. Warning: will show all available info.') // shout-out to lvm's Heinz M.
     .option('-m, --mode <mode>', 'Use the specified mode [blitz, queue], defaults to queue.', 'queue')
     .option('-s, --server', 'Start server and stream results')
-    .option('-r, --requests <n>', 'Number of requests to send, defaults to 1000', parseInt)
-    .option('-k, --concurrency <n>', 'Number of concurrent threads, defaults to 10', parseInt)
-    .option('-q, --queue <n>', 'Number of requests to fill queue with, defaults to 1000', parseInt)
+    .option('-k, --concurrency <n>', 'Number of concurrent threads, defaults to 10. Applicable in modes: [blitz, queue].', parseInt)
+    .option('-r, --requests <n>', 'Number of requests to send, defaults to 1000. Applicable in modes: [blitz].', parseInt)
+    .option('-q, --queue <n>', 'Number of requests to fill queue with, defaults to 1000. Applicable in modes: [queue]', parseInt)
     .parse(args);
 };
 
@@ -328,6 +348,7 @@ function main() {
 
   // Request Obj
   const req_obj = {
+    method: "GET",
     scheme: 'http',
     host: 'localhost',
     port: 3000,
@@ -335,7 +356,7 @@ function main() {
   };
 
   // App Options Defaults
-  const app_opt = {
+  var app_opt = {
     debug: false,
     record_stats: false,
     show_progress: true,
@@ -349,14 +370,14 @@ function main() {
 
   // Event Timing Options
   const event_opt = {
-    timeout: 1500,
+    timeout: 20000,
     max_errors: 10,
     simulate: {
       max: 2000,
       min: 250,
       tick: 100
     },
-    maxSockets: 1000
+    maxSockets: 10000
   };
 
   // const request_opt = {
@@ -376,7 +397,8 @@ function main() {
     time: { // running time
       min: 0,
       max: 0,
-      avg: 0
+      avg: 0,
+      total: 0
     },
     last: { // last iter
       start: 0,
@@ -399,6 +421,7 @@ function main() {
   function setParams(cb) {
     if (program.logging)
       app_opt.record_stats = true;
+
     if (program.verbose) {
       app_opt.show_progress = false;
       app_opt.debug = true;
